@@ -48,6 +48,8 @@
 // See http://www.glfw.org/ for more information.
 #include <GLFW/glfw3.h>
 
+#include <Eigen/Core>
+
 #include "shader_program.h"
 
 // Annonymous namespace for constants and helper functions.
@@ -76,9 +78,12 @@ GLfloat vertices[] = {
 const std::string vertex_shader_src =
     "#version 330 core\n"
     "layout (location = 0) in vec3 position;\n"
+    "uniform mat4 model;\n"
+    "uniform mat4 view;\n"
+    "uniform mat4 projection;\n"
     "\n"
     "void main() {\n"
-    "gl_Position = vec4(position, 1.0f);\n"
+    "gl_Position = projection * view * model * vec4(position, 1.0f);\n"
     "}\n";
 
 // Fragment shader follows standard 3.3.0. The goal of the fragment shader is to
@@ -208,6 +213,19 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   ClearTheFrameBuffer();
   // Let OpenGL know that we want to use our shader program.
   shader_program.Use();
+  // Get the locations of the uniform variables.
+  const GLint model_location = 
+    glGetUniformLocation(shader_program.shader_program_id(), "model");
+  const GLint view_location = 
+    glGetUniformLocation(shader_program.shader_program_id(), "view");
+  const GLint projection_location = 
+    glGetUniformLocation(shader_program.shader_program_id(), "projection");
+  Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
+  Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
+  Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+  glUniformMatrix4fv(model_location, 1, GL_FALSE, model.data());
+  glUniformMatrix4fv(view_location, 1, GL_FALSE, view.data());
+  glUniformMatrix4fv(projection_location, 1, GL_FALSE, projection.data());
   // Draw the triangle.
   // Let OpenGL know what vertex array object we will use.
   glBindVertexArray(vertex_array_object_id);
