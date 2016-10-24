@@ -32,6 +32,7 @@
 // Please contact the author of this library if you have any questions.
 // Author: Victor Fragoso (victor.fragoso@mail.wvu.edu)
 
+#include <cmath>
 #include <iostream>
 #include <string>
 
@@ -60,9 +61,9 @@ constexpr int kWindowHeight = 480;
 
 // Triangle vertices.
 GLfloat vertices[] = {
-  -0.5f, -0.5f, 0.0f,
-  0.5f, -0.5f, 0.0f,
-  0.0f,  0.5f, 0.0f
+  -100.0f, -100.0f, -2.5f,
+  100.5f, -100.5f, -2.5f,
+  0.0f,  100.5f, -2.5f
 };
 
 // GLSL shaders.
@@ -115,6 +116,38 @@ static void KeyCallback(GLFWwindow* window,
     glfwSetWindowShouldClose(window, GL_TRUE);
   }
 }
+
+// General form.
+Eigen::Matrix4f ComputeProjectionMatrix(
+  GLfloat left, 
+  GLfloat right, 
+  GLfloat top, 
+  GLfloat bottom, 
+  GLfloat near, 
+  GLfloat far) {
+  Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+  projection(0, 0) = 2.0 * near / (right - left);
+  projection(1, 1) = 2.0 * near / (top - bottom);
+  projection(2, 2) = -(far + near) / (far - near);
+  projection(0, 2) = (right + left) / (right - left);
+  projection(1, 2) = (top + bottom) / (top - bottom);
+  projection(2, 3) = -2.0 * far * near / (far - near);
+  projection(3, 3) = 0.0f;
+  projection(3, 2) = -1.0f;
+  return projection;
+}
+
+Eigen::Matrix4f ComputeProjectionMatrix(
+  GLfloat field_of_view, GLfloat aspect_ratio, GLfloat near, GLfloat far) {
+  GLfloat pi = 3.1416f;
+  GLfloat top = near * tan((pi / 180.0f) * field_of_view * 0.5f);
+  GLfloat bottom = -top;
+  GLfloat right = top * aspect_ratio;
+  GLfloat left = -right;
+  return ComputeProjectionMatrix(left, right, top, bottom, near, far);
+}
+
+
 
 // Configures glfw.
 void SetWindowHints() {
@@ -208,6 +241,7 @@ void SetVertexArrayObject(GLuint* vertex_buffer_object_id,
 // Renders the scene.
 void RenderScene(const wvu::ShaderProgram& shader_program,
                  const GLuint vertex_array_object_id,
+                 const Eigen::Matrix4f& projection,
                  GLFWwindow* window) {
   // Clear the buffer.
   ClearTheFrameBuffer();
@@ -222,7 +256,9 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
     glGetUniformLocation(shader_program.shader_program_id(), "projection");
   Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
   Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
-  Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+  // We do not create the projection matrix here because the projection 
+  // matrix does not change.
+  // Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
   glUniformMatrix4fv(model_location, 1, GL_FALSE, model.data());
   glUniformMatrix4fv(view_location, 1, GL_FALSE, view.data());
   glUniformMatrix4fv(projection_location, 1, GL_FALSE, projection.data());
@@ -298,10 +334,17 @@ int main(int argc, char** argv) {
   GLuint vertex_array_object_id;
   SetVertexArrayObject(&vertex_buffer_object_id, &vertex_array_object_id);
 
+  // Create projection matrix.
+  // Dimensions of image were (640, 480)
+  const Eigen::Matrix4f projection_matrix = 
+     ComputeProjectionMatrix(-320, 320, 240, -240, 0.1, 10);
+  std::cout << projection_matrix << std::endl;
+
   // Loop until the user closes the window.
   while (!glfwWindowShouldClose(window)) {
     // Render the scene!
-    RenderScene(shader_program, vertex_array_object_id, window);
+    RenderScene(shader_program, vertex_array_object_id, 
+                projection_matrix, window);
 
     // Swap front and back buffers.
     glfwSwapBuffers(window);
