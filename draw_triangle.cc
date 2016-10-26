@@ -50,6 +50,7 @@
 #include <GLFW/glfw3.h>
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include "shader_program.h"
 
@@ -59,11 +60,11 @@ namespace {
 constexpr int kWindowWidth = 640;
 constexpr int kWindowHeight = 480;
 
-// Triangle vertices.
+// Triangle vertices (in the model space).
 GLfloat vertices[] = {
-  -100.0f, -100.0f, -2.5f,
-  100.5f, -100.5f, -2.5f,
-  0.0f,  100.5f, -2.5f
+  -500.0f, -500.0f, 0.f,
+  500.0f, -500.0f, 0.f,
+  0.0f,  500.0f, 0.f
 };
 
 // GLSL shaders.
@@ -115,6 +116,33 @@ static void KeyCallback(GLFWwindow* window,
   if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
     glfwSetWindowShouldClose(window, GL_TRUE);
   }
+}
+
+class Model {
+public:
+  Model() {}
+  ~Model() {}
+
+private:
+  Eigen::Vector3f orientation;
+  Eigen::Vector3f position;
+  std::vector<Eigen::Vector3f> vertices;
+};
+
+Eigen::Matrix4f ComputeTranslation(
+  const Eigen::Vector3f& offset) {
+  Eigen::Matrix4f transformation = Eigen::Matrix4f::Identity();
+  transformation.col(3) = offset.homogeneous();
+  return transformation;
+}
+
+Eigen::Matrix4f ComputeRotation(const Eigen::Vector3f& axis,
+                                const GLfloat angle) {
+  Eigen::AngleAxisf rotation(angle, axis);
+  Eigen::Matrix4f transformation = Eigen::Matrix4f::Identity();
+  Eigen::Matrix3f rot3 = rotation.matrix();
+  transformation.block(0, 0, 3, 3)  = rot3;
+  return transformation;
 }
 
 // General form.
@@ -254,7 +282,12 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
     glGetUniformLocation(shader_program.shader_program_id(), "view");
   const GLint projection_location = 
     glGetUniformLocation(shader_program.shader_program_id(), "projection");
-  Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
+  Eigen::Matrix4f translation = 
+    ComputeTranslation(Eigen::Vector3f(100.0f, -1.0f, -1.0f));
+  Eigen::Matrix4f rotation = ComputeRotation(Eigen::Vector3f::UnitZ(),
+                             3.1416f / 2.0f);
+  Eigen::Matrix4f model = translation * rotation;
+  std::cout << "Model: \n" << model << std::endl;
   Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
   // We do not create the projection matrix here because the projection 
   // matrix does not change.
