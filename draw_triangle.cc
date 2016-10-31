@@ -119,8 +119,15 @@ static void KeyCallback(GLFWwindow* window,
   }
 }
 
+// Class that will help us keep the state of any model more easily.
 class Model {
 public:
+  // Constructor.
+  // Params
+  //  orientation  Axis of rotation whose norm is the angle
+  //     (aka Rodrigues vector).
+  //  position  The position of the object in the world.
+  //  vertices  The vertices forming the object.
   Model(const Eigen::Vector3f& orientation,
         const Eigen::Vector3f& position,
         const Eigen::MatrixXf& vertices) {
@@ -128,14 +135,20 @@ public:
     position_ = position;
     vertices_ = vertices; 
   }
+  // Default destructor.
   ~Model() {}
 
+  // Setters set members by *copying* input parameters.
   void SetOrientation(const Eigen::Vector3f& orientation) {
     orientation_ = orientation;
   }
 
   void SetPosition(const Eigen::Vector3f& position);
 
+  // If we want to avoid copying, we can return a pointer to
+  // the member. Note that making public the attributes work
+  // if we want to modify directly the members. However, this
+  // is a matter of design.
   Eigen::Vector3f* mutable_orientation() {
     return &orientation_;
   }
@@ -144,6 +157,7 @@ public:
     return &position_;
   }
 
+  // Getters, return a const reference to the member.
   const Eigen::Vector3f& GetOrientation() {
     return orientation_;
   }
@@ -154,15 +168,20 @@ public:
 
 private:
   // Attributes.
+  // The convention we will use is to define a '_' after the name
+  // of the attribute.
   Eigen::Vector3f orientation_;
   Eigen::Vector3f position_;
   Eigen::MatrixXf vertices_;
 };
 
+// Implements the setter for position. Note that the class somehow defines
+// a namespace.
 void Model::SetPosition(const Eigen::Vector3f& position) {
   position_ = position;
 }
 
+// -------------------- Helper Functions ----------------------------------
 Eigen::Matrix4f ComputeTranslation(
   const Eigen::Vector3f& offset) {
   Eigen::Matrix4f transformation = Eigen::Matrix4f::Identity();
@@ -181,12 +200,12 @@ Eigen::Matrix4f ComputeRotation(const Eigen::Vector3f& axis,
 
 // General form.
 Eigen::Matrix4f ComputeProjectionMatrix(
-  GLfloat left, 
-  GLfloat right, 
-  GLfloat top, 
-  GLfloat bottom, 
-  GLfloat near, 
-  GLfloat far) {
+  const GLfloat left, 
+  const GLfloat right, 
+  const GLfloat top, 
+  const GLfloat bottom, 
+  const GLfloat near, 
+  const GLfloat far) {
   Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
   projection(0, 0) = 2.0 * near / (right - left);
   projection(1, 1) = 2.0 * near / (top - bottom);
@@ -199,8 +218,10 @@ Eigen::Matrix4f ComputeProjectionMatrix(
   return projection;
 }
 
-Eigen::Matrix4f ComputeProjectionMatrix(
-  GLfloat field_of_view, GLfloat aspect_ratio, GLfloat near, GLfloat far) {
+Eigen::Matrix4f ComputeProjectionMatrix(const GLfloat field_of_view,
+                                        const GLfloat aspect_ratio,
+                                        const GLfloat near,
+                                        const GLfloat far) {
   GLfloat pi = 3.1416f;
   GLfloat top = near * tan((pi / 180.0f) * field_of_view * 0.5f);
   GLfloat bottom = -top;
@@ -209,7 +230,7 @@ Eigen::Matrix4f ComputeProjectionMatrix(
   return ComputeProjectionMatrix(left, right, top, bottom, near, far);
 }
 
-
+// -------------------- End of Helper Functions --------------------------------
 
 // Configures glfw.
 void SetWindowHints() {
@@ -413,7 +434,8 @@ int main(int argc, char** argv) {
   // Loop until the user closes the window.
   while (!glfwWindowShouldClose(window)) {
     // Render the scene!
-    // () casting using the C operator.
+    // Casting using (<type>) -- which is the C way -- is not recommended.
+    // Instead, use static_cast<type>(input argument).
     angle = static_cast<GLfloat>(glfwGetTime()) * 10.0f;
     RenderScene(shader_program, vertex_array_object_id, 
                 projection_matrix, angle, window);
