@@ -35,6 +35,7 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+#include <vector>
 
 // The macro below tells the linker to use the GLEW library in a static way.
 // This is mainly for compatibility with Windows.
@@ -120,14 +121,47 @@ static void KeyCallback(GLFWwindow* window,
 
 class Model {
 public:
-  Model() {}
+  Model(const Eigen::Vector3f& orientation,
+        const Eigen::Vector3f& position,
+        const Eigen::MatrixXf& vertices) {
+    orientation_ = orientation;
+    position_ = position;
+    vertices_ = vertices; 
+  }
   ~Model() {}
 
+  void SetOrientation(const Eigen::Vector3f& orientation) {
+    orientation_ = orientation;
+  }
+
+  void SetPosition(const Eigen::Vector3f& position);
+
+  Eigen::Vector3f* mutable_orientation() {
+    return &orientation_;
+  }
+
+  Eigen::Vector3f* mutable_position() {
+    return &position_;
+  }
+
+  const Eigen::Vector3f& GetOrientation() {
+    return orientation_;
+  }
+
+  const Eigen::Vector3f& GetPosition() {
+    return position_;
+  }
+
 private:
-  Eigen::Vector3f orientation;
-  Eigen::Vector3f position;
-  std::vector<Eigen::Vector3f> vertices;
+  // Attributes.
+  Eigen::Vector3f orientation_;
+  Eigen::Vector3f position_;
+  Eigen::MatrixXf vertices_;
 };
+
+void Model::SetPosition(const Eigen::Vector3f& position) {
+  position_ = position;
+}
 
 Eigen::Matrix4f ComputeTranslation(
   const Eigen::Vector3f& offset) {
@@ -270,6 +304,7 @@ void SetVertexArrayObject(GLuint* vertex_buffer_object_id,
 void RenderScene(const wvu::ShaderProgram& shader_program,
                  const GLuint vertex_array_object_id,
                  const Eigen::Matrix4f& projection,
+                 const GLfloat angle,
                  GLFWwindow* window) {
   // Clear the buffer.
   ClearTheFrameBuffer();
@@ -283,9 +318,10 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   const GLint projection_location = 
     glGetUniformLocation(shader_program.shader_program_id(), "projection");
   Eigen::Matrix4f translation = 
-    ComputeTranslation(Eigen::Vector3f(100.0f, -1.0f, -1.0f));
-  Eigen::Matrix4f rotation = ComputeRotation(Eigen::Vector3f::UnitZ(),
-                             3.1416f / 2.0f);
+    ComputeTranslation(Eigen::Vector3f(0.0f, 0.0f, sin(0.5 * angle) - 1.0f));
+  Eigen::Matrix4f rotation = 
+    ComputeRotation(Eigen::Vector3f::UnitZ(),
+                    angle);
   Eigen::Matrix4f model = translation * rotation;
   std::cout << "Model: \n" << model << std::endl;
   Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
@@ -372,12 +408,15 @@ int main(int argc, char** argv) {
   const Eigen::Matrix4f projection_matrix = 
      ComputeProjectionMatrix(-320, 320, 240, -240, 0.1, 10);
   std::cout << projection_matrix << std::endl;
+  GLfloat angle = 0.0f;  // State of rotation.
 
   // Loop until the user closes the window.
   while (!glfwWindowShouldClose(window)) {
     // Render the scene!
+    // () casting using the C operator.
+    angle = static_cast<GLfloat>(glfwGetTime()) * 10.0f;
     RenderScene(shader_program, vertex_array_object_id, 
-                projection_matrix, window);
+                projection_matrix, angle, window);
 
     // Swap front and back buffers.
     glfwSwapBuffers(window);
