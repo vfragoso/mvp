@@ -32,6 +32,7 @@
 // Please contact the author of this library if you have any questions.
 // Author: Victor Fragoso (victor.fragoso@mail.wvu.edu)
 
+#define _USE_MATH_DEFINES  // For using M_PI.
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -61,12 +62,14 @@ namespace {
 constexpr int kWindowWidth = 640;
 constexpr int kWindowHeight = 480;
 
-// Triangle vertices (in the model space).
-GLfloat vertices[] = {
-  -500.0f, -500.0f, 0.f,
-  500.0f, -500.0f, 0.f,
-  0.0f,  500.0f, 0.f
-};
+// // Triangle vertices (in the model space).
+// // Note that we don't use these vertices anymore, since we have now our class
+// // that takes care of the vertices.
+// GLfloat vertices[] = {
+//   -500.0f, -500.0f, 0.f,
+//   500.0f, -500.0f, 0.f,
+//   0.0f,  500.0f, 0.f
+// };
 
 // GLSL shaders.
 // Every shader should declare its version.
@@ -133,7 +136,7 @@ public:
         const Eigen::MatrixXf& vertices) {
     orientation_ = orientation;
     position_ = position;
-    vertices_ = vertices; 
+    vertices_ = vertices;
   }
   // Default destructor.
   ~Model() {}
@@ -164,6 +167,10 @@ public:
 
   const Eigen::Vector3f& GetPosition() {
     return position_;
+  }
+
+  const Eigen::MatrixXf& vertices() const {
+    return vertices_;
   }
 
 private:
@@ -218,16 +225,42 @@ Eigen::Matrix4f ComputeProjectionMatrix(
   return projection;
 }
 
+// Mathematical constants. The right way to get PI in C++ is to use the
+// macro M_PI. To do so, we have to include math.h or cmath and define
+// the _USE_MATH_DEFINES macro to enable these constants. See the header
+// section.
+constexpr GLfloat kHalfPi = 0.5f * static_cast<GLfloat>(M_PI);
+
+// Compute cotangent. Since C++ does not provide cotangent, we implement it
+// as follows. Recall that cotangent is essentially tangent flipped and
+// translated 90 degrees (or PI / 2 radians). To do the flipping and translation
+// we have to do PI / 2 - angle. Subtracting the angle flips the curve.
+// See the plots for http://mathworld.wolfram.com/Cotangent.html and
+// http://mathworld.wolfram.com/Tangent.html
+inline GLfloat ComputeCotangent(const GLfloat angle) {
+  return tan(kHalfPi - angle);
+}
+
+// Reparametrization of the ComputeProjectionMatrix. This function only
+// requires 4 parameters rather than 6 parameters.
 Eigen::Matrix4f ComputeProjectionMatrix(const GLfloat field_of_view,
                                         const GLfloat aspect_ratio,
                                         const GLfloat near,
                                         const GLfloat far) {
-  GLfloat pi = 3.1416f;
-  GLfloat top = near * tan((pi / 180.0f) * field_of_view * 0.5f);
-  GLfloat bottom = -top;
-  GLfloat right = top * aspect_ratio;
-  GLfloat left = -right;
-  return ComputeProjectionMatrix(left, right, top, bottom, near, far);
+  // Create the projection matrix.
+  const GLfloat y_scale = ComputeCotangent(0.5f * field_of_view);
+  const GLfloat x_scale = y_scale / aspect_ratio;
+  const GLfloat planes_distance = far - near;
+  const GLfloat z_scale =
+      -(near + far) / planes_distance;
+  const GLfloat homogeneous_scale =
+      -2 * near * far / planes_distance;
+  Eigen::Matrix4f projection_matrix;
+  projection_matrix << x_scale, 0.0f, 0.0f, 0.0f,
+      0.0f, y_scale, 0.0f, 0.0f,
+      0.0f, 0.0f, z_scale, homogeneous_scale,
+      0.0f, 0.0f, -1.0f, 0.0f;
+  return projection_matrix;
 }
 
 // -------------------- End of Helper Functions --------------------------------
@@ -271,7 +304,7 @@ void ClearTheFrameBuffer() {
 
 // Creates and transfers the vertices into the GPU. Returns the vertex buffer
 // object id.
-GLuint SetVertexBufferObject() {
+GLuint SetVertexBufferObject(const Model& model) {
   // Create a vertex buffer object (vbo).
   GLuint vertex_buffer_object_id;
   glGenBuffers(1, &vertex_buffer_object_id);
@@ -289,14 +322,22 @@ GLuint SetVertexBufferObject() {
   // 2. GL_DYNAMIC_DRAW: the data will likely change.
   // 3. GL_STREAM_DRAW: the data will change every time it is drawn.
   // See https://www.opengl.org/sdk/docs/man/html/glBufferData.xhtml.
-  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+  const Eigen::MatrixXf& vertices = model.vertices();
+  const int vertices_size_in_bytes =
+      vertices.rows() * vertices.cols() * sizeof(vertices(0, 0));
+  glBufferData(GL_ARRAY_BUFFER,
+               vertices_size_in_bytes,
+               vertices.data(),
+               GL_STATIC_DRAW);
   // Inform OpenGL how the vertex buffer is arranged.
   constexpr GLuint kIndex = 0;  // Index of the first buffer array.
-  constexpr GLuint kNumElementsInBuffer = 3;
-  constexpr GLuint kBufferSize = kNumElementsInBuffer * sizeof(vertices[0]);
+  // A vertex right now contains 3 elements because we have x, y, z. But we can
+  // add more information per vertex as we will see shortly.
+  constexpr GLuint kNumElementsPerVertex = 3;
+  constexpr GLuint kStride = kNumElementsPerVertex * sizeof(vertices(0, 0));
   const GLvoid* offset_ptr = nullptr;
-  glVertexAttribPointer(kIndex, kNumElementsInBuffer, GL_FLOAT, GL_FALSE,
-                        kBufferSize, offset_ptr);
+  glVertexAttribPointer(kIndex, kNumElementsPerVertex, GL_FLOAT, GL_FALSE,
+                        kStride, offset_ptr);
   // Set as active our newly generated VBO.
   glEnableVertexAttribArray(kIndex);
   // Unbind buffer so that later we can use it.
@@ -306,7 +347,8 @@ GLuint SetVertexBufferObject() {
 
 // Creates and sets the vertex array object (VAO) for our triangle. Returns the
 // id of the created VAO.
-void SetVertexArrayObject(GLuint* vertex_buffer_object_id,
+void SetVertexArrayObject(const Model& model,
+                          GLuint* vertex_buffer_object_id,
                           GLuint* vertex_array_object_id) {
   // Create the vertex array object (VAO).
   constexpr int kNumVertexArrays = 1;
@@ -316,7 +358,7 @@ void SetVertexArrayObject(GLuint* vertex_buffer_object_id,
   // Set the recently created vertex array object (VAO) current.
   glBindVertexArray(*vertex_array_object_id);
   // Create the Vertex Buffer Object (VBO).
-  *vertex_buffer_object_id = SetVertexBufferObject();
+  *vertex_buffer_object_id = SetVertexBufferObject(model);
   // Disable our created VAO.
   glBindVertexArray(0);
 }
@@ -339,10 +381,9 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   const GLint projection_location = 
     glGetUniformLocation(shader_program.shader_program_id(), "projection");
   Eigen::Matrix4f translation = 
-    ComputeTranslation(Eigen::Vector3f(0.0f, 0.0f, sin(0.5 * angle) - 1.0f));
+    ComputeTranslation(Eigen::Vector3f(0.0f, 0.0f, -5.0f));
   Eigen::Matrix4f rotation = 
-    ComputeRotation(Eigen::Vector3f::UnitZ(),
-                    angle);
+    ComputeRotation(Eigen::Vector3f::UnitZ(), angle);
   Eigen::Matrix4f model = translation * rotation;
   std::cout << "Model: \n" << model << std::endl;
   Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
@@ -355,10 +396,12 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   // Draw the triangle.
   // Let OpenGL know what vertex array object we will use.
   glBindVertexArray(vertex_array_object_id);
+  // Set to GL_LINE instead of GL_FILL to visualize the poligons as wireframes.
+  glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
   // First argument specifies the primitive to use.
   // Second argument specifies the starting index in the VAO.
   // Third argument specified the number of vertices to use.
-  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
   // Let OpenGL know that we are done with our vertex array object.
   glBindVertexArray(0);
 }
@@ -422,21 +465,35 @@ int main(int argc, char** argv) {
   // Prepare buffers to hold the vertices in GPU.
   GLuint vertex_buffer_object_id;
   GLuint vertex_array_object_id;
-  SetVertexArrayObject(&vertex_buffer_object_id, &vertex_array_object_id);
+  Eigen::MatrixXf vertices(3, 8);
+  vertices.col(0) = Eigen::Vector3f(0.0f, 1.0f, 0.0f);
+  vertices.col(1) = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
+  vertices.col(2) = Eigen::Vector3f(1.0f, 1.0f, 0.0f);
+  vertices.col(3) = Eigen::Vector3f(1.0f, 0.0f, 0.0f);
+  vertices.col(4) = Eigen::Vector3f(1.0f, 1.0f, -1.0f);
+  vertices.col(5) = Eigen::Vector3f(1.0f, 0.0f, -1.0f);
+  vertices.col(6) = Eigen::Vector3f(0.0f, 1.0f, -1.0f);
+  vertices.col(7) = Eigen::Vector3f(0.0f, 0.0f, -1.0f);
+  Model model(Eigen::Vector3f(0, 0, 0),  // Orientation of object.
+              Eigen::Vector3f(0, 0, 0),  // Position of object.
+              vertices);
+  SetVertexArrayObject(model, &vertex_buffer_object_id, &vertex_array_object_id);
 
   // Create projection matrix.
-  // Dimensions of image were (640, 480)
+  const GLfloat field_of_view = 45.0f;
+  const GLfloat aspect_ratio = kWindowWidth / kWindowHeight;
   const Eigen::Matrix4f projection_matrix = 
-     ComputeProjectionMatrix(-320, 320, 240, -240, 0.1, 10);
+      ComputeProjectionMatrix(field_of_view, aspect_ratio, 0.1, 10);
   std::cout << projection_matrix << std::endl;
   GLfloat angle = 0.0f;  // State of rotation.
 
   // Loop until the user closes the window.
+  const GLfloat rotation_speed = 50.0f;
   while (!glfwWindowShouldClose(window)) {
     // Render the scene!
     // Casting using (<type>) -- which is the C way -- is not recommended.
     // Instead, use static_cast<type>(input argument).
-    angle = static_cast<GLfloat>(glfwGetTime()) * 10.0f;
+    angle = rotation_speed * static_cast<GLfloat>(glfwGetTime()) * M_PI / 180.f;
     RenderScene(shader_program, vertex_array_object_id, 
                 projection_matrix, angle, window);
 
