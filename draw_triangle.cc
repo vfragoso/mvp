@@ -138,6 +138,25 @@ public:
     position_ = position;
     vertices_ = vertices;
   }
+
+  // Constructor.
+  // Params
+  //  orientation  Axis of rotation whose norm is the angle
+  //     (aka Rodrigues vector).
+  //  position  The position of the object in the world.
+  //  vertices  The vertices forming the object.
+  //  indices  Indices for EBO.
+  Model(const Eigen::Vector3f& orientation,
+        const Eigen::Vector3f& position,
+        const Eigen::MatrixXf& vertices,
+        const std::vector<GLuint>& indices) {
+    orientation_ = orientation;
+    position_ = position;
+    vertices_ = vertices;
+    indices_ = indices;
+  }
+
+
   // Default destructor.
   ~Model() {}
 
@@ -173,6 +192,10 @@ public:
     return vertices_;
   }
 
+  const std::vector<GLuint>& indices() const {
+    return indices_;
+  }
+
 private:
   // Attributes.
   // The convention we will use is to define a '_' after the name
@@ -180,6 +203,7 @@ private:
   Eigen::Vector3f orientation_;
   Eigen::Vector3f position_;
   Eigen::MatrixXf vertices_;
+  std::vector<GLuint> indices_;
 };
 
 // Implements the setter for position. Note that the class somehow defines
@@ -345,11 +369,32 @@ GLuint SetVertexBufferObject(const Model& model) {
   return vertex_buffer_object_id;
 }
 
+GLuint SetElementBufferObject(const Model& model) {
+  // Allocates memory in the GPU for the EBO.
+  GLuint element_buffer_object_id;
+  glGenBuffers(1, &element_buffer_object_id);
+  // Set the GL_ARRAY_BUFFER of OpenGL to the vbo we just created.
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer_object_id);
+  const std::vector<GLuint>& indices = model.indices();
+  const int indices_size_in_bytes = indices.size() * sizeof(indices[0]);
+  // Copying buffer to the GPU.
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+               indices_size_in_bytes,
+               indices.data(),
+               GL_STATIC_DRAW);
+  // NOTE: Do not unbing EBO. It turns out that when we create a buffer of type
+  // GL_ELEMENT_ARRAY_BUFFER, the VAO who contains the EBO remembers the
+  // bindings we perform. Thus if we unbind it, we detach the created EBO and we
+  // won't see results.
+  return element_buffer_object_id;
+}
+
 // Creates and sets the vertex array object (VAO) for our triangle. Returns the
 // id of the created VAO.
 void SetVertexArrayObject(const Model& model,
                           GLuint* vertex_buffer_object_id,
-                          GLuint* vertex_array_object_id) {
+                          GLuint* vertex_array_object_id,
+                          GLuint* element_buffer_object_id) {
   // Create the vertex array object (VAO).
   constexpr int kNumVertexArrays = 1;
   // This function creates kNumVertexArrays vaos and stores the ids in the
@@ -359,6 +404,7 @@ void SetVertexArrayObject(const Model& model,
   glBindVertexArray(*vertex_array_object_id);
   // Create the Vertex Buffer Object (VBO).
   *vertex_buffer_object_id = SetVertexBufferObject(model);
+  *element_buffer_object_id = SetElementBufferObject(model);
   // Disable our created VAO.
   glBindVertexArray(0);
 }
@@ -383,7 +429,8 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   Eigen::Matrix4f translation = 
     ComputeTranslation(Eigen::Vector3f(0.0f, 0.0f, -5.0f));
   Eigen::Matrix4f rotation = 
-    ComputeRotation(Eigen::Vector3f::UnitZ(), angle);
+    ComputeRotation(Eigen::Vector3f(1.0f, 1.0f, 1.0f).normalized(),
+                    angle);
   Eigen::Matrix4f model = translation * rotation;
   std::cout << "Model: \n" << model << std::endl;
   Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
@@ -401,7 +448,10 @@ void RenderScene(const wvu::ShaderProgram& shader_program,
   // First argument specifies the primitive to use.
   // Second argument specifies the starting index in the VAO.
   // Third argument specified the number of vertices to use.
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
+  // glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
+
+  // Call glDrawElements to use the EBO.
+  glDrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_INT, 0);
   // Let OpenGL know that we are done with our vertex array object.
   glBindVertexArray(0);
 }
@@ -465,6 +515,17 @@ int main(int argc, char** argv) {
   // Prepare buffers to hold the vertices in GPU.
   GLuint vertex_buffer_object_id;
   GLuint vertex_array_object_id;
+  GLuint element_buffer_object_id;
+  std::vector<GLuint> indices = {
+    0, 1, 3,  // First triangle.
+    0, 3, 2,  // Second triangle.
+    2, 3, 5,  // Third triangle.
+    2, 5, 4,  // Fourth triangle.
+    4, 5, 7,  // Fifth triangle.
+    4, 7, 6,  // Sixth triangle.
+    0, 1, 7,  // Seventh triangle.
+    0, 7, 6   // Eigth triangle.
+  };
   Eigen::MatrixXf vertices(3, 8);
   vertices.col(0) = Eigen::Vector3f(0.0f, 1.0f, 0.0f);
   vertices.col(1) = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
@@ -474,10 +535,15 @@ int main(int argc, char** argv) {
   vertices.col(5) = Eigen::Vector3f(1.0f, 0.0f, -1.0f);
   vertices.col(6) = Eigen::Vector3f(0.0f, 1.0f, -1.0f);
   vertices.col(7) = Eigen::Vector3f(0.0f, 0.0f, -1.0f);
+  // These vertices were used for Triangle Strip.
+  // vertices.col(8) = Eigen::Vector3f(0.0f, 1.0f, 0.0f);
+  // vertices.col(9) = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
   Model model(Eigen::Vector3f(0, 0, 0),  // Orientation of object.
               Eigen::Vector3f(0, 0, 0),  // Position of object.
-              vertices);
-  SetVertexArrayObject(model, &vertex_buffer_object_id, &vertex_array_object_id);
+              vertices, indices);
+  SetVertexArrayObject(model, &vertex_buffer_object_id, 
+                       &vertex_array_object_id,
+                       &element_buffer_object_id);
 
   // Create projection matrix.
   const GLfloat field_of_view = 45.0f;
